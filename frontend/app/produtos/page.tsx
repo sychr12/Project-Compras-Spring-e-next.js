@@ -11,6 +11,7 @@ interface Product {
   description: string;
   price: number;
   stock: number;
+  imageUrl?: string;
 }
 
 export default function ProdutosPage() {
@@ -27,8 +28,11 @@ export default function ProdutosPage() {
   }, []);
 
   const handleAddToCart = (product: Product) => {
+    // Guard SSR
+    if (typeof window === 'undefined') return;
+
     const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    const existing = cart.find((item: any) => item.id === product.id);
+    const existing = cart.find((item: Product & { quantity: number }) => item.id === product.id);
     if (existing) {
       existing.quantity += 1;
     } else {

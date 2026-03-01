@@ -22,22 +22,27 @@ export default function CarrinhoPage() {
     cardName: '', cardNumber: '', expiry: '', cvv: '',
   });
 
+  // Guard SSR: só acessa localStorage no cliente
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const stored = JSON.parse(localStorage.getItem('cart') || '[]');
     setCart(stored);
   }, []);
 
+  const saveCart = (updated: CartItem[]) => {
+    setCart(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cart', JSON.stringify(updated));
+    }
+  };
+
   const updateQuantity = (id: number, quantity: number) => {
     if (quantity <= 0) return removeItem(id);
-    const updated = cart.map((item) => item.id === id ? { ...item, quantity } : item);
-    setCart(updated);
-    localStorage.setItem('cart', JSON.stringify(updated));
+    saveCart(cart.map((item) => item.id === id ? { ...item, quantity } : item));
   };
 
   const removeItem = (id: number) => {
-    const updated = cart.filter((item) => item.id !== id);
-    setCart(updated);
-    localStorage.setItem('cart', JSON.stringify(updated));
+    saveCart(cart.filter((item) => item.id !== id));
   };
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -54,7 +59,7 @@ export default function CarrinhoPage() {
         total,
         status: 'PENDING',
       });
-      localStorage.removeItem('cart');
+      if (typeof window !== 'undefined') localStorage.removeItem('cart');
       router.push('/sucesso');
     } catch {
       alert('Erro ao finalizar pedido. Tente novamente.');
@@ -144,7 +149,7 @@ export default function CarrinhoPage() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-4">
               <div className="flex items-center gap-2 text-zinc-400 text-sm">
                 <Lock size={14} />
-                Pagamento seguro e criptografado
+                Pagamento seguro
               </div>
 
               <div>
