@@ -1,0 +1,100 @@
+services:
+
+  # BACKEND
+  auth-service:
+    build: ./backend/auth-service
+    container_name: auth-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/auth_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: luiz
+      SERVER_PORT: 8081
+    ports:
+      - "8081:8081"
+    networks:
+      - compras-network
+    restart: on-failure
+
+  product-service:
+    build: ./backend/product-service
+    container_name: product-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/product_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: luiz
+      SERVER_PORT: 8082
+    ports:
+      - "8082:8082"
+    volumes:
+      - product-uploads:/app/uploads
+    networks:
+      - compras-network
+    restart: on-failure
+
+  order-service:
+    build: ./backend/order-service
+    container_name: order-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/order_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: luiz
+      SERVER_PORT: 8083
+      PRODUCT_SERVICE_URL: http://product-service:8082
+      SHIPPING_SERVICE_URL: http://shipping-service:8084
+    ports:
+      - "8083:8083"
+    depends_on:
+      - product-service
+      - shipping-service
+    networks:
+      - compras-network
+    restart: on-failure
+
+  shipping-service:
+    build: ./backend/shipping-service
+    container_name: shipping-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/shipping_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: luiz
+      SERVER_PORT: 8084
+    ports:
+      - "8084:8084"
+    networks:
+      - compras-network
+    restart: on-failure
+
+  api-gateway:
+    build: ./backend/api-gateway
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - product-service
+      - order-service
+      - shipping-service
+    networks:
+      - compras-network
+    restart: on-failure
+
+  # FRONTEND
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    depends_on:
+      - api-gateway
+    networks:
+      - compras-network
+    restart: on-failure
+
+networks:
+  compras-network:
+    driver: bridge
+
+volumes:
+  product-uploads:
