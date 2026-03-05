@@ -5,15 +5,12 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import com.compras.order.dto.OrderRequest;
@@ -34,7 +31,6 @@ public class OrderController {
     @Value("${shipping.service.url}")
     private String shippingServiceUrl;
 
-    // RestTemplate injetado via construtor (não instanciado direto no campo)
     public OrderController(OrderRepository orderRepository, RestTemplate restTemplate) {
         this.orderRepository = orderRepository;
         this.restTemplate = restTemplate;
@@ -46,26 +42,26 @@ public class OrderController {
             return ResponseEntity.badRequest().body("Pedido deve ter ao menos um item");
         }
 
-        // Valida estoque antes de criar o pedido (evita criar pedido com estoque insuficiente)
+        // Valida estoque de todos os itens antes de alterar qualquer coisa
         for (OrderRequest.ItemRequest itemReq : request.getItems()) {
             try {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> product = restTemplate.getForObject(
                     productServiceUrl + "/products/" + itemReq.getProductId(), Map.class);
                 if (product == null) {
-                    return ResponseEntity.badRequest().body("Produto não encontrado: " + itemReq.getProductId());
+                    return ResponseEntity.badRequest().body("Produto nao encontrado: " + itemReq.getProductId());
                 }
                 int currentStock = ((Number) product.get("stock")).intValue();
                 if (currentStock < itemReq.getQuantity()) {
                     return ResponseEntity.badRequest().body("Estoque insuficiente para: " + product.get("name"));
                 }
-            } catch (Exception e) {
+            } catch (RestClientException e) {
                 return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body("Serviço de produtos indisponível: " + e.getMessage());
+                    .body("Servico de produtos indisponivel: " + e.getMessage());
             }
         }
 
-        // Decrementa estoque após validação completa
+        // Decrementa estoque usando exchange com HttpMethod.PATCH (RestTemplate nao suporta patchForObject nativamente)
         for (OrderRequest.ItemRequest itemReq : request.getItems()) {
             try {
                 @SuppressWarnings("unchecked")
@@ -73,11 +69,13 @@ public class OrderController {
                     productServiceUrl + "/products/" + itemReq.getProductId(), Map.class);
                 if (product != null) {
                     int currentStock = ((Number) product.get("stock")).intValue();
-                    restTemplate.patchForObject(
+                    HttpEntity<Map<String, Object>> entity = new HttpEntity<>(
+                        Map.of("stock", currentStock - itemReq.getQuantity()));
+                    restTemplate.exchange(
                         productServiceUrl + "/products/" + itemReq.getProductId() + "/stock",
-                        Map.of("stock", currentStock - itemReq.getQuantity()), Map.class);
+                        HttpMethod.PATCH, entity, Map.class);
                 }
-            } catch (Exception e) {
+            } catch (RestClientException e) {
                 return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body("Erro ao atualizar estoque: " + e.getMessage());
             }
@@ -118,22 +116,19 @@ public class OrderController {
     public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
         String newStatus = body.get("status");
         if (newStatus == null || newStatus.isBlank()) {
-            return ResponseEntity.badRequest().body("Campo 'status' é obrigatório");
+            return ResponseEntity.badRequest().body("Campo 'status' e obrigatorio");
         }
 
         return orderRepository.findById(id).map(order -> {
             order.setStatus(newStatus);
             Order saved = orderRepository.save(order);
 
-            // Notifica shipping-service quando confirmado
             if ("CONFIRMED".equals(newStatus)) {
                 try {
                     restTemplate.postForObject(
                         shippingServiceUrl + "/shipping",
                         Map.of("orderId", id, "status", "PREPARING"), Map.class);
-                } catch (Exception ignored) {
-                    // Falha na notificação não deve reverter o status do pedido
-                }
+                } catch (RestClientException ignored) {}
             }
 
             return ResponseEntity.ok(saved);
